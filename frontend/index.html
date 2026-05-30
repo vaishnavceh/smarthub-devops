@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartHub</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+    .navbar { background: #1e293b; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
+    .navbar h1 { color: #38bdf8; font-size: 22px; }
+    .container { max-width: 900px; margin: 40px auto; padding: 0 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+    .card h2 { margin-bottom: 16px; color: #38bdf8; }
+    input { width: 100%; padding: 10px 14px; margin-bottom: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+    button { width: 100%; padding: 12px; border-radius: 8px; border: none; background: #38bdf8; color: #0f172a; font-size: 16px; font-weight: bold; cursor: pointer; }
+    button:hover { background: #7dd3fc; }
+    .status { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+    .success { background: #064e3b; color: #6ee7b7; }
+    .error { background: #450a0a; color: #fca5a5; }
+    .note-card { background: #0f172a; border-radius: 8px; padding: 16px; margin-bottom: 12px; border-left: 3px solid #38bdf8; }
+    .note-card h3 { margin-bottom: 6px; color: #7dd3fc; }
+    .note-card p { color: #94a3b8; font-size: 14px; }
+    #notes-section { display: none; }
+    .tag { display: inline-block; background: #1e40af; color: #93c5fd; padding: 2px 10px; border-radius: 20px; font-size: 12px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <h1>SmartHub</h1>
+    <span id="user-tag"></span>
+  </div>
+
+  <div class="container">
+
+    <div class="card" id="login-section">
+      <h2>Login</h2>
+      <div id="login-status"></div>
+      <input type="text" id="username" placeholder="Username" value="admin"/>
+      <input type="password" id="password" placeholder="Password" value="password123"/>
+      <button onclick="login()">Login</button>
+    </div>
+
+    <div id="notes-section">
+      <div class="card">
+        <h2>My Notes</h2>
+        <div id="notes-list"></div>
+        <button onclick="loadNotes()">Refresh Notes</button>
+      </div>
+
+      <div class="card">
+        <h2>Backend Health</h2>
+        <div id="health-status"></div>
+        <button onclick="checkHealth()">Check Health</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const API = "http://localhost:8000"
+
+    async function login() {
+      const username = document.getElementById("username").value
+      const password = document.getElementById("password").value
+      const statusEl = document.getElementById("login-status")
+
+      try {
+        const res = await fetch(`${API}/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        })
+        const data = await res.json()
+
+        if (data.success) {
+          statusEl.innerHTML = `<div class="status success">Login successful! Welcome ${data.username}</div>`
+          document.getElementById("login-section").style.display = "none"
+          document.getElementById("notes-section").style.display = "block"
+          document.getElementById("user-tag").innerHTML = `<span class="tag">${data.username}</span>`
+          loadNotes()
+        } else {
+          statusEl.innerHTML = `<div class="status error">${data.message}</div>`
+        }
+      } catch (err) {
+        statusEl.innerHTML = `<div class="status error">Cannot connect to backend. Is it running?</div>`
+      }
+    }
+
+    async function loadNotes() {
+      const list = document.getElementById("notes-list")
+      try {
+        const res = await fetch(`${API}/api/notes`)
+        const data = await res.json()
+        list.innerHTML = data.notes.map(n => `
+          <div class="note-card">
+            <h3>${n.title}</h3>
+            <p>${n.content}</p>
+          </div>
+        `).join("")
+      } catch (err) {
+        list.innerHTML = `<div class="status error">Could not load notes</div>`
+      }
+    }
+
+    async function checkHealth() {
+      const el = document.getElementById("health-status")
+      try {
+        const res = await fetch(`${API}/health`)
+        const data = await res.json()
+        el.innerHTML = `<div class="status success">Status: ${data.status} | App: ${data.app}</div>`
+      } catch (err) {
+        el.innerHTML = `<div class="status error">Backend not reachable</div>`
+      }
+    }
+  </script>
+</body>
+</html>
