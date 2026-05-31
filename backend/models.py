@@ -33,11 +33,11 @@ class Note(Base):
     owner = relationship("User", back_populates="notes")
 
 class Document(Base):
-    """Documents table — uploaded files"""
     __tablename__ = "documents"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.id"))
+    title = Column(String)  # ADD THIS LINE
     filename = Column(String)
     file_path = Column(String)
     file_size = Column(Integer)

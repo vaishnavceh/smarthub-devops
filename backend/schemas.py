@@ -60,3 +60,18 @@ class NoteResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class DocumentCreate(BaseModel):
+    """Metadata when uploading a document"""
+    title: str
+
+class DocumentResponse(BaseModel):
+    """What we return about documents"""
+    id: str
+    title: str
+    filename: str
+    file_size: int
+    uploaded_at: datetime
+
+    class Config:
+        from_attributes = True

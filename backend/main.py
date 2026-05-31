@@ -1,11 +1,18 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from pathlib import Path
+import os
 
 from database import get_db, engine, Base
-from models import User, Note
-from schemas import UserRegister, UserLogin, TokenResponse, NoteCreate, NoteUpdate, NoteResponse
+from models import User, Note, Document
+from schemas import (
+    UserRegister, UserLogin, TokenResponse,
+    NoteCreate, NoteUpdate, NoteResponse,
+    DocumentCreate, DocumentResponse
+)
 from security import hash_password, verify_password, create_access_token, verify_token
 
 # Create all tables
@@ -21,10 +28,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============ HEALTH CHECK ============
+
 @app.get("/health")
 def health():
     """Health check endpoint"""
     return {"status": "ok", "app": "SmartHub"}
+
+# ============ AUTHENTICATION ENDPOINTS ============
 
 @app.post("/api/register", response_model=TokenResponse)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
@@ -76,11 +87,6 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     
     Takes: email, password
     Returns: JWT token
-    
-    What happens:
-    1. Find user by email
-    2. Check password matches
-    3. Create token
     """
     # Find user by email
     user = db.query(User).filter(User.email == credentials.email).first()
@@ -110,7 +116,7 @@ def get_current_user(token: str = None, db: Session = Depends(get_db)):
     """
     Get current logged-in user's info
     
-    Takes: JWT token in Authorization header
+    Takes: JWT token
     Returns: User data
     """
     if not token:
@@ -143,10 +149,10 @@ def get_current_user(token: str = None, db: Session = Depends(get_db)):
         "full_name": user.full_name
     }
 
-# ============ NOTES ENDPOINTS ============
+# ============ HELPER FUNCTION ============
 
 def get_current_user_from_token(token: str, db: Session) -> User:
-    """Helper function: Extract user from token"""
+    """Extract user from JWT token"""
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -169,18 +175,18 @@ def get_current_user_from_token(token: str, db: Session) -> User:
     
     return user
 
+# ============ NOTES ENDPOINTS ============
+
 @app.post("/api/notes", response_model=NoteResponse)
 def create_note(note_data: NoteCreate, token: str = None, db: Session = Depends(get_db)):
     """
-    Create a new note for logged-in user
+    Create a new note
     
     Takes: title, content (+ JWT token)
     Returns: Created note with id, timestamps
     """
-    # Get current user from token
     user = get_current_user_from_token(token, db)
     
-    # Create new note
     new_note = Note(
         user_id=user.id,
         title=note_data.title,
@@ -203,7 +209,6 @@ def list_notes(token: str = None, db: Session = Depends(get_db)):
     """
     user = get_current_user_from_token(token, db)
     
-    # Query all notes belonging to this user
     notes = db.query(Note).filter(Note.user_id == user.id).all()
     
     return notes
@@ -212,8 +217,6 @@ def list_notes(token: str = None, db: Session = Depends(get_db)):
 def get_note(note_id: str, token: str = None, db: Session = Depends(get_db)):
     """
     Get a single note by id
-    
-    Checks: Does note exist? Does it belong to current user?
     """
     user = get_current_user_from_token(token, db)
     
@@ -234,8 +237,6 @@ def get_note(note_id: str, token: str = None, db: Session = Depends(get_db)):
 def update_note(note_id: str, note_data: NoteUpdate, token: str = None, db: Session = Depends(get_db)):
     """
     Update a note
-    
-    User can update only their own notes
     """
     user = get_current_user_from_token(token, db)
     
@@ -265,8 +266,6 @@ def update_note(note_id: str, note_data: NoteUpdate, token: str = None, db: Sess
 def delete_note(note_id: str, token: str = None, db: Session = Depends(get_db)):
     """
     Delete a note
-    
-    User can delete only their own notes
     """
     user = get_current_user_from_token(token, db)
     
@@ -285,3 +284,102 @@ def delete_note(note_id: str, token: str = None, db: Session = Depends(get_db)):
     db.commit()
     
     return {"message": "Note deleted successfully"}
+
+# ============ DOCUMENTS ENDPOINTS ============
+
+# Directory to store uploaded files
+UPLOAD_DIR = Path("/app/uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+@app.post("/api/documents/upload", response_model=DocumentResponse)
+def upload_document(file: UploadFile = File(...), token: str = None, db: Session = Depends(get_db)):
+    """
+    Upload a document/file
+    
+    Takes: file (binary), JWT token
+    Returns: Document metadata with id
+    """
+    user = get_current_user_from_token(token, db)
+    
+    # Check file size (max 10MB)
+    MAX_SIZE = 10 * 1024 * 1024
+    file_size = 0
+    
+    # Save file to disk
+    file_path = UPLOAD_DIR / f"{user.id}_{file.filename}"
+    
+    try:
+        with open(file_path, "wb") as f:
+            for chunk in file.file:
+                file_size += len(chunk)
+                if file_size > MAX_SIZE:
+                    os.remove(file_path)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File too large (max 10MB)"
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # Save document record to database
+    document = Document(
+        user_id=user.id,
+        title=file.filename,
+        filename=file.filename,
+        file_path=str(file_path),
+        file_size=file_size
+    )
+    
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    
+    return document
+
+@app.get("/api/documents", response_model=list[DocumentResponse])
+def list_documents(token: str = None, db: Session = Depends(get_db)):
+    """
+    List all documents uploaded by user
+    
+    Takes: JWT token
+    Returns: List of user's documents
+    """
+    user = get_current_user_from_token(token, db)
+    
+    documents = db.query(Document).filter(Document.user_id == user.id).all()
+    
+    return documents
+
+@app.get("/api/documents/{document_id}")
+def download_document(document_id: str, token: str = None, db: Session = Depends(get_db)):
+    """
+    Download a document
+    
+    Returns the file as binary data
+    """
+    user = get_current_user_from_token(token, db)
+    
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == user.id
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    file_path = Path(document.file_path)
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    # Return file as download
+    return FileResponse(
+        path=file_path,
+        filename=document.filename,
+        media_type='application/octet-stream'
+    )
