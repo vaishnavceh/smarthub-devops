@@ -50,14 +50,3 @@ services:
 volumes:
   pgdata:
   chromadata:
-  
-nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - backend
-      - frontend  
-  
